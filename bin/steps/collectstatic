@@ -1,35 +1,48 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2250 # TODO: Use braces around variable references even when not strictly required.
 
 # Django Collectstatic runner. If you have Django installed, collectstatic will
 # automatically be executed as part of the build process. If collectstatic
 # fails, your build fails.
 
-# This functionality will only activate if Django is in requirements.txt.
+# This functionality will only activate if Django is installed.
 
 # Runtime arguments:
 #   - $DISABLE_COLLECTSTATIC: disables this functionality.
 #   - $DEBUG_COLLECTSTATIC: upon failure, print out environment variables.
 
-# shellcheck source=bin/utils
-source "$BIN_DIR/utils"
+# This script is run in a subshell via sub_env so doesn't inherit the options/vars/utils from `bin/compile`.
+# TODO: Stop running this script in a subshell.
+set -euo pipefail
+BUILDPACK_DIR=$(cd "$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")" && pwd)
+source "${BUILDPACK_DIR}/bin/utils"
+source "${BUILDPACK_DIR}/lib/output.sh"
+
+# Required for `meta_set`.
+source "${BUILDPACK_DIR}/lib/metadata.sh"
+meta_init "${CACHE_DIR:?}" "python"
 
 if [[ -f .heroku/collectstatic_disabled ]]; then
-  puts-step "Skipping Django collectstatic since the file '.heroku/collectstatic_disabled' exists."
-  puts-warn "This approach is deprecated, please set the env var DISABLE_COLLECTSTATIC=1 instead."
-  mcount "warnings.collectstatic_disabled_file"
-  mcount "django.collectstatic.disabled"
-  exit 0
+	output::step "Skipping Django collectstatic since the file '.heroku/collectstatic_disabled' exists."
+	output::warning <<-'EOF'
+		Warning: The .heroku/collectstatic_disabled file is deprecated.
+
+		Please remove the file and set the env var DISABLE_COLLECTSTATIC=1 instead.
+	EOF
+	meta_set "django_collectstatic" "disabled-file"
+	exit 0
 fi
 
 if [[ "${DISABLE_COLLECTSTATIC:-0}" != "0" ]]; then
-  puts-step "Skipping Django collectstatic since the env var DISABLE_COLLECTSTATIC is set."
-  mcount "django.collectstatic.disabled"
-  exit 0
+	output::step "Skipping Django collectstatic since the env var DISABLE_COLLECTSTATIC is set."
+	meta_set "django_collectstatic" "disabled-env-var"
+	exit 0
 fi
 
 # Ensure that Django is actually installed.
+# shellcheck disable=SC2310 # TODO: This function is invoked in an 'if' condition so set -e will be disabled.
 if ! is_module_available 'django'; then
-  exit 0
+	exit 0
 fi
 
 # Location of 'manage.py', if it exists.
@@ -37,59 +50,65 @@ MANAGE_FILE=$(find . -maxdepth 3 -type f -name 'manage.py' -printf '%d\t%P\n' | 
 MANAGE_FILE=${MANAGE_FILE:-fakepath}
 
 if [[ ! -f "${MANAGE_FILE}" ]]; then
-  puts-step "Skipping Django collectstatic since no manage.py file found."
-  mcount "django.collectstatic.no_manage_py"
-  exit 0
+	output::step "Skipping Django collectstatic since no manage.py file found."
+	meta_set "django_collectstatic" "skipped-no-manage-py"
+	exit 0
 fi
 
-mcount "django.collectstatic.enabled"
+meta_set "django_collectstatic" "enabled"
 
-puts-step "$ python $MANAGE_FILE collectstatic --noinput"
+output::step "$ python $MANAGE_FILE collectstatic --noinput"
 
 PYTHONPATH=${PYTHONPATH:-.}
 export PYTHONPATH
 COLLECTSTATIC_LOG=$(mktemp)
 
 set +e
-python "$MANAGE_FILE" collectstatic --noinput --traceback 2>&1 | tee "$COLLECTSTATIC_LOG" | sed '/^Post-processed/d;/^Copying/d;/^$/d' | indent
+python "$MANAGE_FILE" collectstatic --noinput --traceback 2>&1 | tee "$COLLECTSTATIC_LOG" | sed --unbuffered '/^Post-processed/d;/^Copying/d;/^$/d' | output::indent
 COLLECTSTATIC_STATUS="${PIPESTATUS[0]}"
 set -e
 
 echo
 
 if [[ "${COLLECTSTATIC_STATUS}" == 0 ]]; then
-  exit 0
+	exit 0
 fi
 
 # Display a warning if collectstatic failed.
 if grep -q 'SyntaxError' "$COLLECTSTATIC_LOG"; then
-  mcount "failure.collectstatic.syntax-error"
+	meta_set "failure_reason" "collectstatic-syntax-error"
 elif grep -q 'ImproperlyConfigured' "$COLLECTSTATIC_LOG"; then
-  mcount "failure.collectstatic.improper-configuration"
+	meta_set "failure_reason" "collectstatic-improper-configuration"
 elif grep -q 'The CSS file' "$COLLECTSTATIC_LOG"; then
-  mcount "failure.collectstatic.fancy-references"
+	meta_set "failure_reason" "collectstatic-fancy-references"
 elif grep -q 'OSError' "$COLLECTSTATIC_LOG"; then
-  mcount "failure.collectstatic.missing-file"
+	meta_set "failure_reason" "collectstatic-missing-file"
 else
-  mcount "failure.collectstatic.other"
+	meta_set "failure_reason" "collectstatic-other"
 fi
 
-echo " !     Error while running '$ python $MANAGE_FILE collectstatic --noinput'."
-echo "       See traceback above for details."
-echo
-echo "       You may need to update application code to resolve this error."
-echo "       Or, you can disable collectstatic for this application:"
-echo
-echo "          $ heroku config:set DISABLE_COLLECTSTATIC=1"
-echo
-echo "       https://devcenter.heroku.com/articles/django-assets"
+output::error <<-EOF
+	Error: Unable to generate Django static files.
+
+	The 'python ${MANAGE_FILE} collectstatic --noinput' Django
+	management command to generate static files failed.
+
+	See the traceback above for details.
+
+	You may need to update application code to resolve this error.
+	Or, you can disable collectstatic for this application:
+
+	   $ heroku config:set DISABLE_COLLECTSTATIC=1
+
+	https://devcenter.heroku.com/articles/django-assets
+EOF
 
 # Additionally, dump out the environment, if debug mode is on.
-if [ "$DEBUG_COLLECTSTATIC" ]; then
-  echo
-  echo "****** Collectstatic environment variables:"
-  echo
-  env | indent
+if [[ "${DEBUG_COLLECTSTATIC:-0}" == "1" ]]; then
+	echo
+	echo "****** Collectstatic environment variables:"
+	echo
+	env | output::indent
 fi
 
 exit 1
