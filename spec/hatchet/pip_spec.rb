@@ -2,230 +2,159 @@
 
 require_relative '../spec_helper'
 
-RSpec.shared_examples 'installs successfully using pip' do
-  it 'installs successfully using pip' do
-    app.deploy do |app|
-      expect(app.output).to include('Installing requirements with pip')
-      expect(app.output).to include('Successfully installed')
-    end
-  end
-end
-
-RSpec.describe 'Pip support' do
+RSpec.describe 'pip support' do
   context 'when requirements.txt is unchanged since the last build' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/python_version_unspecified') }
+    let(:buildpacks) { [:default, 'heroku-community/inline'] }
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_basic', buildpacks:) }
 
     it 're-uses packages from the cache' do
       app.deploy do |app|
-        expect(clean_output(app.output)).to match(Regexp.new(<<~REGEX))
+        expect(clean_output(app.output)).to include(<<~OUTPUT)
           remote: -----> Python app detected
-          remote: -----> No Python version was specified. Using the buildpack default: python-#{DEFAULT_PYTHON_VERSION}
-          remote:        To use a different version, see: https://devcenter.heroku.com/articles/python-runtimes
-          remote: -----> Installing python-#{DEFAULT_PYTHON_VERSION}
-          remote: -----> Installing pip #{PIP_VERSION}, setuptools #{SETUPTOOLS_VERSION} and wheel #{WHEEL_VERSION}
-          remote: -----> Installing SQLite3
-          remote: -----> Installing requirements with pip
-          remote:        Collecting urllib3 \\(from -r requirements.txt \\(line 1\\)\\)
-          remote:          Obtaining dependency information for urllib3 from .*
-          remote:          Downloading urllib3-.*
-          remote:        Downloading urllib3-.*
-          remote:        Installing collected packages: urllib3
-          remote:        Successfully installed urllib3-.*
-        REGEX
+          remote: -----> Using Python #{DEFAULT_PYTHON_MAJOR_VERSION} specified in .python-version
+          remote: -----> Installing Python #{DEFAULT_PYTHON_FULL_VERSION}
+          remote: -----> Installing pip #{PIP_VERSION}
+          remote: -----> Installing dependencies using 'pip install -r requirements.txt'
+          remote:        Collecting typing-extensions==4.12.2 (from -r requirements.txt (line 5))
+          remote:          Downloading typing_extensions-4.12.2-py3-none-any.whl.metadata (3.0 kB)
+          remote:        Downloading typing_extensions-4.12.2-py3-none-any.whl (37 kB)
+          remote:        Installing collected packages: typing-extensions
+          remote:        Successfully installed typing-extensions-4.12.2
+          remote: -----> Inline app detected
+          remote: LANG=en_US.UTF-8
+          remote: LD_LIBRARY_PATH=/app/.heroku/python/lib
+          remote: LIBRARY_PATH=/app/.heroku/python/lib
+          remote: PATH=/app/.heroku/python/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          remote: PYTHONHASHSEED=random
+          remote: PYTHONHOME=/app/.heroku/python
+          remote: PYTHONPATH=/app
+          remote: PYTHONUNBUFFERED=true
+          remote: 
+          remote: ['',
+          remote:  '/app',
+          remote:  '/app/.heroku/python/lib/python313.zip',
+          remote:  '/app/.heroku/python/lib/python3.13',
+          remote:  '/app/.heroku/python/lib/python3.13/lib-dynload',
+          remote:  '/app/.heroku/python/lib/python3.13/site-packages']
+          remote: 
+          remote: Package           Version
+          remote: ----------------- -------
+          remote: pip               #{PIP_VERSION}
+          remote: typing_extensions 4.12.2
+          remote: 
+          remote: <module 'typing_extensions' from '/app/.heroku/python/lib/python3.13/site-packages/typing_extensions.py'>
+        OUTPUT
         app.commit!
         app.push!
         expect(clean_output(app.output)).to include(<<~OUTPUT)
           remote: -----> Python app detected
-          remote: -----> No Python version was specified. Using the same version as the last build: python-#{DEFAULT_PYTHON_VERSION}
-          remote:        To use a different version, see: https://devcenter.heroku.com/articles/python-runtimes
-          remote: -----> No change in requirements detected, installing from cache
-          remote: -----> Using cached install of python-#{DEFAULT_PYTHON_VERSION}
-          remote: -----> Installing pip #{PIP_VERSION}, setuptools #{SETUPTOOLS_VERSION} and wheel #{WHEEL_VERSION}
-          remote: -----> Installing SQLite3
-          remote: -----> Installing requirements with pip
-          remote: -----> Discovering process types
+          remote: -----> Using Python #{DEFAULT_PYTHON_MAJOR_VERSION} specified in .python-version
+          remote: -----> Restoring cache
+          remote: -----> Using cached install of Python #{DEFAULT_PYTHON_FULL_VERSION}
+          remote: -----> Installing pip #{PIP_VERSION}
+          remote: -----> Installing dependencies using 'pip install -r requirements.txt'
+          remote: -----> Inline app detected
         OUTPUT
       end
     end
   end
 
   context 'when requirements.txt has changed since the last build' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/python_version_unspecified') }
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_basic') }
 
     it 'clears the cache before installing the packages again' do
       app.deploy do |app|
-        File.write('requirements.txt', 'six', mode: 'a')
+        # The test fixture's requirements.txt is a symlink to a requirements file in a subdirectory in
+        # order to test that symlinked requirements files work in general and with cache invalidation.
+        File.write('requirements/prod.txt', 'six==1.17.0', mode: 'a')
         app.commit!
         app.push!
-        expect(clean_output(app.output)).to match(Regexp.new(<<~REGEX))
+        expect(clean_output(app.output)).to include(<<~OUTPUT)
           remote: -----> Python app detected
-          remote: -----> No Python version was specified. Using the same version as the last build: python-#{DEFAULT_PYTHON_VERSION}
-          remote:        To use a different version, see: https://devcenter.heroku.com/articles/python-runtimes
-          remote: -----> Requirements file has been changed, clearing cached dependencies
-          remote: -----> Installing python-#{DEFAULT_PYTHON_VERSION}
-          remote: -----> Installing pip #{PIP_VERSION}, setuptools #{SETUPTOOLS_VERSION} and wheel #{WHEEL_VERSION}
-          remote: -----> Installing SQLite3
-          remote: -----> Installing requirements with pip
-          remote:        Collecting urllib3 \\(from -r requirements.txt \\(line 1\\)\\)
-          remote:          Obtaining dependency information for urllib3 from .*
-          remote:          Downloading urllib3-.*
-          remote:        Collecting six \\(from -r requirements.txt \\(line 2\\)\\)
-          remote:          Downloading six-.*
-          remote:        Downloading urllib3-.*
-          remote:        Installing collected packages: urllib3, six
-          remote:        Successfully installed six-.* urllib3-.*
-        REGEX
+          remote: -----> Using Python #{DEFAULT_PYTHON_MAJOR_VERSION} specified in .python-version
+          remote: -----> Discarding cache since:
+          remote:        - The contents of requirements.txt changed
+          remote: -----> Installing Python #{DEFAULT_PYTHON_FULL_VERSION}
+          remote: -----> Installing pip #{PIP_VERSION}
+          remote: -----> Installing dependencies using 'pip install -r requirements.txt'
+          remote:        Collecting typing-extensions==4.12.2 (from -r requirements.txt (line 5))
+          remote:          Downloading typing_extensions-4.12.2-py3-none-any.whl.metadata (3.0 kB)
+          remote:        Collecting six==1.17.0 (from -r requirements.txt (line 6))
+          remote:          Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+          remote:        Downloading typing_extensions-4.12.2-py3-none-any.whl (37 kB)
+          remote:        Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+          remote:        Installing collected packages: typing-extensions, six
+          remote:        Successfully installed six-1.17.0 typing-extensions-4.12.2
+        OUTPUT
       end
     end
   end
 
-  context 'when requirements.txt contains popular compiled packages' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/requirements_compiled') }
-
-    include_examples 'installs successfully using pip'
-  end
-
-  context 'when requirements.txt contains Git requirements URLs' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/requirements_git') }
-
-    include_examples 'installs successfully using pip'
-  end
-
-  context 'when requirements.txt contains editable requirements' do
+  # This test intentionally uses Python 3.12, so that we test rewriting using older globally installed
+  # setuptools. The Poetry equivalent of this test covers the PEP-517/518 setuptools case.
+  context 'when requirements.txt contains editable requirements (both VCS and local package)' do
     let(:buildpacks) { [:default, 'heroku-community/inline'] }
-    let(:app) { Hatchet::Runner.new('spec/fixtures/requirements_editable', buildpacks:) }
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_editable', buildpacks:) }
 
     it 'rewrites .pth, .egg-link and finder paths correctly for hooks, later buildpacks, runtime and cached builds' do
       app.deploy do |app|
-        expect(clean_output(app.output)).to match(Regexp.new(<<~REGEX, Regexp::MULTILINE))
-          remote:        Successfully installed gunicorn-20.1.0 local-package-pyproject-toml-0.0.1 local-package-setup-py-0.0.1
-          remote: -----> Running post-compile hook
-          remote: ==> .heroku/python/lib/python.*/site-packages/distutils-precedence.pth <==
-          remote: .*
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/easy-install.pth <==
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: /app/.heroku/src/gunicorn
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable___local_package_pyproject_toml_0_0_1_finder.py <==
-          remote: .*
-          remote: MAPPING = \\{'local_package_pyproject_toml': '/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'\\}
-          remote: .*
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable__.local_package_pyproject_toml-0.0.1.pth <==
-          remote: import __editable___.*
-          remote: ==> .heroku/python/lib/python.*/site-packages/gunicorn.egg-link <==
-          remote: /app/.heroku/src/gunicorn
-          remote: .
-          remote: ==> .heroku/python/lib/python.*/site-packages/local-package-setup-py.egg-link <==
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: .
-          remote: Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
-          remote: Running entrypoint for the setup.py-based local package: Hello setup.py!
-          remote: Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
+        expect(clean_output(app.output)).to match(Regexp.new(<<~REGEX))
+          remote: -----> Running bin/post_compile hook
+          remote:        easy-install.pth:/app/.heroku/src/gunicorn
+          remote:        easy-install.pth:/tmp/build_.*/packages/local_package_setup_py
+          remote:        __editable___local_package_pyproject_toml_0_0_1_finder.py:/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'}
+          remote:        gunicorn.egg-link:/app/.heroku/src/gunicorn
+          remote:        local-package-setup-py.egg-link:/tmp/build_.*/packages/local_package_setup_py
+          remote:        
+          remote:        Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
+          remote:        Running entrypoint for the setup.py-based local package: Hello setup.py!
+          remote:        Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
           remote: -----> Inline app detected
-          remote: ==> .heroku/python/lib/python.*/site-packages/distutils-precedence.pth <==
-          remote: .*
+          remote: easy-install.pth:/app/.heroku/src/gunicorn
+          remote: easy-install.pth:/tmp/build_.*/packages/local_package_setup_py
+          remote: __editable___local_package_pyproject_toml_0_0_1_finder.py:/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'}
+          remote: gunicorn.egg-link:/app/.heroku/src/gunicorn
+          remote: local-package-setup-py.egg-link:/tmp/build_.*/packages/local_package_setup_py
           remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/easy-install.pth <==
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: /app/.heroku/src/gunicorn
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable___local_package_pyproject_toml_0_0_1_finder.py <==
-          remote: .*
-          remote: MAPPING = \\{'local_package_pyproject_toml': '/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'\\}
-          remote: .*
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable__.local_package_pyproject_toml-0.0.1.pth <==
-          remote: import __editable___.*
-          remote: ==> .heroku/python/lib/python.*/site-packages/gunicorn.egg-link <==
-          remote: /app/.heroku/src/gunicorn
-          remote: .
-          remote: ==> .heroku/python/lib/python.*/site-packages/local-package-setup-py.egg-link <==
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: .
           remote: Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
           remote: Running entrypoint for the setup.py-based local package: Hello setup.py!
           remote: Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
         REGEX
 
         # Test rewritten paths work at runtime.
-        expect(app.run('bin/test-entrypoints')).to match(Regexp.new(<<~REGEX, Regexp::MULTILINE))
-          ==> .heroku/python/lib/python.*/site-packages/distutils-precedence.pth <==
-          .*
+        expect(app.run('bin/test-entrypoints.sh')).to include(<<~OUTPUT)
+          easy-install.pth:/app/.heroku/src/gunicorn
+          easy-install.pth:/app/packages/local_package_setup_py
+          __editable___local_package_pyproject_toml_0_0_1_finder.py:/app/packages/local_package_pyproject_toml/local_package_pyproject_toml'}
+          gunicorn.egg-link:/app/.heroku/src/gunicorn
+          local-package-setup-py.egg-link:/app/packages/local_package_setup_py
 
-          ==> .heroku/python/lib/python.*/site-packages/easy-install.pth <==
-          /app/packages/local_package_setup_py
-          /app/.heroku/src/gunicorn
-
-          ==> .heroku/python/lib/python.*/site-packages/__editable___local_package_pyproject_toml_0_0_1_finder.py <==
-          .*
-          MAPPING = \\{'local_package_pyproject_toml': '/app/packages/local_package_pyproject_toml/local_package_pyproject_toml'\\}
-          .*
-
-          ==> .heroku/python/lib/python.*/site-packages/__editable__.local_package_pyproject_toml-0.0.1.pth <==
-          import __editable___.*
-          ==> .heroku/python/lib/python.*/site-packages/gunicorn.egg-link <==
-          /app/.heroku/src/gunicorn
-          .
-          ==> .heroku/python/lib/python.*/site-packages/local-package-setup-py.egg-link <==
-          /app/packages/local_package_setup_py
-          .
           Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
           Running entrypoint for the setup.py-based local package: Hello setup.py!
-          Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
-        REGEX
+          Running entrypoint for the VCS package: gunicorn (version 20.1.0)
+        OUTPUT
 
         # Test that the cached .pth files work correctly.
         app.commit!
         app.push!
-        expect(clean_output(app.output)).to match(Regexp.new(<<~REGEX, Regexp::MULTILINE))
-          remote:        Successfully installed gunicorn-20.1.0 local-package-pyproject-toml-0.0.1 local-package-setup-py-0.0.1
-          remote: -----> Running post-compile hook
-          remote: ==> .heroku/python/lib/python.*/site-packages/distutils-precedence.pth <==
-          remote: .*
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/easy-install.pth <==
-          remote: /app/.heroku/src/gunicorn
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable___local_package_pyproject_toml_0_0_1_finder.py <==
-          remote: .*
-          remote: MAPPING = \\{'local_package_pyproject_toml': '/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'\\}
-          remote: .*
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable__.local_package_pyproject_toml-0.0.1.pth <==
-          remote: import __editable___.*
-          remote: ==> .heroku/python/lib/python.*/site-packages/gunicorn.egg-link <==
-          remote: /app/.heroku/src/gunicorn
-          remote: .
-          remote: ==> .heroku/python/lib/python.*/site-packages/local-package-setup-py.egg-link <==
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: .
-          remote: Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
-          remote: Running entrypoint for the setup.py-based local package: Hello setup.py!
-          remote: Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
+        expect(clean_output(app.output)).to match(Regexp.new(<<~REGEX))
+          remote: -----> Running bin/post_compile hook
+          remote:        easy-install.pth:/app/.heroku/src/gunicorn
+          remote:        easy-install.pth:/tmp/build_.*/packages/local_package_setup_py
+          remote:        __editable___local_package_pyproject_toml_0_0_1_finder.py:/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'}
+          remote:        gunicorn.egg-link:/app/.heroku/src/gunicorn
+          remote:        local-package-setup-py.egg-link:/tmp/build_.*/packages/local_package_setup_py
+          remote:        
+          remote:        Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
+          remote:        Running entrypoint for the setup.py-based local package: Hello setup.py!
+          remote:        Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
           remote: -----> Inline app detected
-          remote: ==> .heroku/python/lib/python.*/site-packages/distutils-precedence.pth <==
-          remote: .*
+          remote: easy-install.pth:/app/.heroku/src/gunicorn
+          remote: easy-install.pth:/tmp/build_.*/packages/local_package_setup_py
+          remote: __editable___local_package_pyproject_toml_0_0_1_finder.py:/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'}
+          remote: gunicorn.egg-link:/app/.heroku/src/gunicorn
+          remote: local-package-setup-py.egg-link:/tmp/build_.*/packages/local_package_setup_py
           remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/easy-install.pth <==
-          remote: /app/.heroku/src/gunicorn
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable___local_package_pyproject_toml_0_0_1_finder.py <==
-          remote: .*
-          remote: MAPPING = \\{'local_package_pyproject_toml': '/tmp/build_.*/packages/local_package_pyproject_toml/local_package_pyproject_toml'\\}
-          remote: .*
-          remote: 
-          remote: ==> .heroku/python/lib/python.*/site-packages/__editable__.local_package_pyproject_toml-0.0.1.pth <==
-          remote: import __editable___.*
-          remote: ==> .heroku/python/lib/python.*/site-packages/gunicorn.egg-link <==
-          remote: /app/.heroku/src/gunicorn
-          remote: .
-          remote: ==> .heroku/python/lib/python.*/site-packages/local-package-setup-py.egg-link <==
-          remote: /tmp/build_.*/packages/local_package_setup_py
-          remote: .
           remote: Running entrypoint for the pyproject.toml-based local package: Hello pyproject.toml!
           remote: Running entrypoint for the setup.py-based local package: Hello setup.py!
           remote: Running entrypoint for the VCS package: gunicorn \\(version 20.1.0\\)
@@ -234,42 +163,97 @@ RSpec.describe 'Pip support' do
     end
   end
 
-  context 'when there is only a setup.py' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/setup_py_only') }
+  context 'when requirements.txt contains a package that needs compiling against the Python headers' do
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_compiled') }
 
-    it 'installs packages from setup.py' do
+    it 'installs successfully using pip' do
       app.deploy do |app|
-        expect(app.output).to include('Running setup.py develop for test')
-        expect(app.output).to include('Successfully installed six')
+        expect(app.output).to include('Building wheel for extension.dist')
       end
     end
   end
 
-  context 'when there is both a requirements.txt and setup.py' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/requirements_txt_and_setup_py') }
+  context 'when requirements.txt contains an invalid requirement' do
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_invalid_requirement', allow_failure: true) }
 
-    it 'installs packages only from requirements.txt' do
+    it 'aborts the build and displays the pip error' do
       app.deploy do |app|
         expect(clean_output(app.output)).to include(<<~OUTPUT)
-          remote: -----> Installing requirements with pip
-          remote:        Collecting urllib3 (from -r requirements.txt (line 1))
+          remote: -----> Installing dependencies using 'pip install -r requirements.txt'
+          remote:        ERROR: Invalid requirement: 'an-invalid-requirement!': Expected end or semicolon (after name and no valid version specifier)
+          remote:            an-invalid-requirement!
+          remote:                                  ^ (from line 1 of requirements.txt)
+          remote: 
+          remote:  !     Error: Unable to install dependencies using pip.
+          remote:  !     
+          remote:  !     See the log output above for more information.
+          remote: 
+          remote:  !     Push rejected, failed to compile Python app.
         OUTPUT
-        expect(app.output).not_to include('Running setup.py develop')
       end
     end
   end
 
   context 'when requirements.txt contains GDAL but the GDAL C++ library is missing' do
-    let(:app) { Hatchet::Runner.new('spec/fixtures/requirements_gdal', allow_failure: true) }
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_gdal', allow_failure: true) }
 
     it 'outputs instructions for how to resolve the build failure' do
       app.deploy do |app|
         expect(clean_output(app.output)).to include(<<~OUTPUT)
-          remote:  !     Hello! Package installation failed since the GDAL library was not found.
+          remote:        note: This error originates from a subprocess, and is likely not a problem with pip.
+          remote: 
+          remote:  !     Error: Package installation failed since the GDAL library was not found.
+          remote:  !     
           remote:  !     For GDAL, GEOS and PROJ support, use the Geo buildpack alongside the Python buildpack:
           remote:  !     https://github.com/heroku/heroku-geo-buildpack
-          remote:  !       -- Much Love, Heroku.
+          remote: 
+          remote: 
+          remote:  !     Error: Unable to install dependencies using pip.
+          remote:  !     
+          remote:  !     See the log output above for more information.
+          remote: 
+          remote:  !     Push rejected, failed to compile Python app.
         OUTPUT
+      end
+    end
+  end
+
+  context 'when requirements.txt contains an old version of Celery with invalid metadata' do
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_legacy_celery', allow_failure: true) }
+
+    it 'outputs instructions for how to resolve the build failure' do
+      app.deploy do |app|
+        expect(clean_output(app.output)).to include(<<~OUTPUT)
+          remote:        ERROR: No matching distribution found for celery==5.2.0
+          remote: 
+          remote:  !     Error: One of your dependencies contains broken metadata.
+          remote:  !     
+          remote:  !     Newer versions of pip reject packages that use invalid versions
+          remote:  !     in their metadata (such as Celery older than v5.2.1).
+          remote:  !     
+          remote:  !     Try upgrading to a newer version of the affected package.
+          remote:  !     
+          remote:  !     For more help, see:
+          remote:  !     https://devcenter.heroku.com/changelog-items/3073
+          remote: 
+          remote: 
+          remote:  !     Error: Unable to install dependencies using pip.
+          remote:  !     
+          remote:  !     See the log output above for more information.
+          remote: 
+          remote:  !     Push rejected, failed to compile Python app.
+        OUTPUT
+      end
+    end
+  end
+
+  # TODO: Switch this to using Python 3.13 as part of the sqlite removal.
+  context 'when requirements.txt contains pysqlite3' do
+    let(:app) { Hatchet::Runner.new('spec/fixtures/pip_pysqlite3') }
+
+    it 'installs successfully using pip' do
+      app.deploy do |app|
+        expect(app.output).to include('Building wheel for pysqlite3')
       end
     end
   end
