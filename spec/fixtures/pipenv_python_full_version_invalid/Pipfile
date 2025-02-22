@@ -4,9 +4,9 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-urllib3 = "*"
+typing-extensions = "*"
 
 [dev-packages]
 
 [requires]
-python_full_version = "X.Y.Z"
+python_full_version = "3.9.*"
